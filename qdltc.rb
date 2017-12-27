@@ -20,6 +20,7 @@ CONTINUE = nil
 TRYCOUNT = 5
 CACHE_DB_PATH = 'md5sum_cache.sqlite3'
 
+#初期設定
 $threads = Array.new(N_THREADS)
 $status = {:skip => 0, :ok => 0, :ng => 0, :path => nil, :cache_skip => 0}
 $keys = %w{skip ok ng cache_skip}
@@ -33,6 +34,7 @@ unless $db.tables.include?(:cache)
   end
 end
 
+#ダウンロード用スレッド処理
 $threads.size.times {|i|
   $threads[i] = Thread.new(i) do
     while o = $q.pop
@@ -82,9 +84,14 @@ $threads.size.times {|i|
 }
 
 watcher = Thread.new do
+  printheader = 10
+  watchline = 0
   while $threads.reduce(false) {|any_alive, t| any_alive or t.alive?}
     last_status = $status.clone
     sleep WAIT
+    if(watchline == 0)
+      print "time path qsize #{$keys.map{|k| k}} count(ok) success% cache_update\n"
+    end
     print "#{Time.now.iso8601[11..18]} #{$status[:path]} #{$q.size} "
     print "#{$keys.map{|k| ($status[k.to_sym] - last_status[k.to_sym]) / WAIT}}/s "
 #    print "#{$keys.map{|k| $status[k.to_sym]}} "
@@ -103,9 +110,19 @@ watcher = Thread.new do
       retry
     end
     $cache_updates = []
+    watchline += 1
+    if(watchline >= printheader)
+      watchline = 0
+    end
   end
 end
 
+# 目録ファイルからタイル情報を読み込みQUEUEを作成する
+# すでにダウンロード済みのタイルはスキップする
+# 　タイル毎にmokuroku.csv.gzのmd5とCACHE_DB_PATHのmd5を比較して
+# 　同じ値であればスキップ
+# 　目録とCACHE_DBのmd5の値が違う場合は実ファイルのmd5をチェックして
+# 　変更があればCACHE_DBを更新
 $cache_updates = []
 $count = 0
 Zlib::GzipReader.open('mokuroku.csv.gz').each_line {|l|
