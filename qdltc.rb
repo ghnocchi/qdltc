@@ -9,11 +9,15 @@ require 'time'
 require 'sequel'
 
 THEME = ARGV[0] || File.basename(File.absolute_path('.'))
-N_THREADS = 8
+N_THREADS = 12
 Q_SIZE = 2000
+#途中経過の表示タイミング
 WAIT = 10
-ALL = 50749203
+#タイル総数 目録より取得して手動で設定する
+ALL = 50749203 
 CONTINUE = nil
+#タイルダウンロード試行回数をオーバーした場合はエラーに出力する
+TRYCOUNT = 5
 CACHE_DB_PATH = 'md5sum_cache.sqlite3'
 
 $threads = Array.new(N_THREADS)
@@ -32,13 +36,25 @@ end
 $threads.size.times {|i|
   $threads[i] = Thread.new(i) do
     while o = $q.pop
+      retrycount = 0
       buf = nil
       begin
         buf = open(o[:url]).read
       rescue
-        print $!, " -- retrying...\n"
-        sleep rand
-        retry
+        retrycount += 1
+        if (retrycount <= TRYCOUNT)
+          print "download url: #{o[:url]}\n"
+          print $!, " -- retrying...\n"
+          sleep rand
+          retry
+        else
+          # リトライカウントをオーバーした場合は
+          # 標準エラーに出力してダウンロード試行を止める。
+          # bufにダミー文字列を代入して後のmd5チェックで
+          # NGにカウントされることを期待する。
+          STDERR.print "#{o[:url]}\n"
+          buf = "dummy"
+        end
       end
       buf_md5 = Digest::MD5.hexdigest(buf)
       if o[:md5] != buf_md5
@@ -96,7 +112,7 @@ Zlib::GzipReader.open('mokuroku.csv.gz').each_line {|l|
   $count += 1
   (path, date, size, md5) = l.strip.split(',')
   date = date.to_i
-  url = "http://cyberjapandata.gsi.go.jp/xyz/#{THEME}/#{path}"
+  url = "https://cyberjapandata.gsi.go.jp/xyz/#{THEME}/#{path}"
   zxy = path.split('.')[0]
   next if /\{z\}/.match(path)
   $status[:path] = path
